@@ -249,6 +249,12 @@ namespace ShaderConductor
         static bool LinkSupport();
         static ResultDesc Link(const LinkDesc& modules, const Options& options, const TargetDesc& target);
     };
+
+	class SC_API Preprocessor
+	{
+	public:
+		static Compiler::ResultDesc Preprocess(const Compiler::SourceDesc& source, const Compiler::Options& options);
+	};
 } // namespace ShaderConductor
 
 #endif // SHADER_CONDUCTOR_HPP

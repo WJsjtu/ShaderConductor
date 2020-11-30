@@ -1246,6 +1246,191 @@ namespace ShaderConductor
         source.stage = modules.stage;
         return ConvertBinary(binaryResult, source, target);
     }
+
+    Compiler::ResultDesc Preprocessor::Preprocess(const Compiler::SourceDesc& source, const Compiler::Options& options)
+    {
+        std::vector<DxcDefine> dxcDefines;
+        std::vector<std::wstring> dxcDefineStrings;
+        // Need to reserve capacity so that small-string optimization does not
+        // invalidate the pointers to internal string data while resizing.
+        dxcDefineStrings.reserve(source.numDefines * 2);
+        for (size_t i = 0; i < source.numDefines; ++i)
+        {
+            const auto& define = source.defines[i];
+
+            std::wstring nameUtf16Str;
+            Unicode::UTF8ToUTF16String(define.name, &nameUtf16Str);
+            dxcDefineStrings.emplace_back(std::move(nameUtf16Str));
+            const wchar_t* nameUtf16 = dxcDefineStrings.back().c_str();
+
+            const wchar_t* valueUtf16;
+            if (define.value != nullptr)
+            {
+                std::wstring valueUtf16Str;
+                Unicode::UTF8ToUTF16String(define.value, &valueUtf16Str);
+                dxcDefineStrings.emplace_back(std::move(valueUtf16Str));
+                valueUtf16 = dxcDefineStrings.back().c_str();
+            }
+            else
+            {
+                valueUtf16 = nullptr;
+            }
+
+            dxcDefines.push_back({nameUtf16, valueUtf16});
+        }
+
+        CComPtr<IDxcBlobEncoding> sourceBlob;
+        IFT(Dxcompiler::Instance().Library()->CreateBlobWithEncodingOnHeapCopy(
+            source.source, static_cast<UINT32>(std::strlen(source.source)), CP_UTF8, &sourceBlob));
+        IFTARG(sourceBlob->GetBufferSize() >= 4);
+
+        std::wstring shaderNameUtf16;
+        Unicode::UTF8ToUTF16String(source.fileName, &shaderNameUtf16);
+
+        std::wstring entryPointUtf16;
+        Unicode::UTF8ToUTF16String(source.entryPoint, &entryPointUtf16);
+
+        std::vector<std::wstring> dxcArgStrings;
+
+        // HLSL matrices are translated into SPIR-V OpTypeMatrixs in a transposed manner,
+        // See also https://antiagainst.github.io/post/hlsl-for-vulkan-matrices/
+        if (options.packMatricesInRowMajor)
+        {
+            dxcArgStrings.push_back(L"-Zpr");
+        }
+        else
+        {
+            dxcArgStrings.push_back(L"-Zpc");
+        }
+
+        if (options.enable16bitTypes)
+        {
+            if (options.shaderModel >= Compiler::ShaderModel{6, 2})
+            {
+                dxcArgStrings.push_back(L"-enable-16bit-types");
+            }
+            else
+            {
+                throw std::runtime_error("16-bit types requires shader model 6.2 or up.");
+            }
+        }
+
+        if (options.enableDebugInfo)
+        {
+            dxcArgStrings.push_back(L"-Zi");
+        }
+
+        if (options.disableOptimizations)
+        {
+            dxcArgStrings.push_back(L"-Od");
+        }
+        else
+        {
+            if (options.optimizationLevel < 4)
+            {
+                dxcArgStrings.push_back(std::wstring(L"-O") + static_cast<wchar_t>(L'0' + options.optimizationLevel));
+            }
+            else
+            {
+                llvm_unreachable("Invalid optimization level.");
+            }
+        }
+
+        if (options.shiftAllCBuffersBindings > 0)
+        {
+            dxcArgStrings.push_back(L"-fvk-b-shift");
+            dxcArgStrings.push_back(std::to_wstring(options.shiftAllCBuffersBindings));
+            dxcArgStrings.push_back(L"all");
+        }
+
+        if (options.shiftAllUABuffersBindings > 0)
+        {
+            dxcArgStrings.push_back(L"-fvk-u-shift");
+            dxcArgStrings.push_back(std::to_wstring(options.shiftAllUABuffersBindings));
+            dxcArgStrings.push_back(L"all");
+        }
+
+        if (options.shiftAllSamplersBindings > 0)
+        {
+            dxcArgStrings.push_back(L"-fvk-s-shift");
+            dxcArgStrings.push_back(std::to_wstring(options.shiftAllSamplersBindings));
+            dxcArgStrings.push_back(L"all");
+        }
+
+        if (options.shiftAllTexturesBindings > 0)
+        {
+            dxcArgStrings.push_back(L"-fvk-t-shift");
+            dxcArgStrings.push_back(std::to_wstring(options.shiftAllTexturesBindings));
+            dxcArgStrings.push_back(L"all");
+        }
+
+        // switch (targetLanguage)
+        // {
+        // case ShadingLanguage::Dxil:
+        //     break;
+
+        // case ShadingLanguage::SpirV:
+        // case ShadingLanguage::Hlsl:
+        // case ShadingLanguage::Glsl:
+        // case ShadingLanguage::Essl:
+        // case ShadingLanguage::Msl_macOS:
+        // case ShadingLanguage::Msl_iOS:
+        //     dxcArgStrings.push_back(L"-spirv");
+        //     break;
+
+        // default:
+        //     llvm_unreachable("Invalid shading language.");
+        // }
+
+        // dxcArgStrings.push_back(std::wstring(L"-H"));
+        dxcArgStrings.push_back(std::wstring(L"-I"));
+        dxcArgStrings.push_back(std::wstring(L"engine-lib"));
+
+        std::vector<const wchar_t*> dxcArgs;
+        dxcArgs.reserve(dxcArgStrings.size());
+        for (const auto& arg : dxcArgStrings)
+        {
+            dxcArgs.push_back(arg.c_str());
+        }
+
+		    CComPtr<IDxcIncludeHandler> includeHandler = new ScIncludeHandler(std::move(source.loadIncludeCallback));
+		    CComPtr<IDxcOperationResult> preprocessResult;
+		    IFT(Dxcompiler::Instance().Compiler()->Preprocess(sourceBlob, shaderNameUtf16.c_str(), dxcArgs.data(), static_cast<UINT32>(dxcArgs.size()), dxcDefines.data(),
+			                                                    static_cast<UINT32>(dxcDefines.size()), includeHandler, &preprocessResult));
+
+        HRESULT status;
+        IFT(preprocessResult->GetStatus(&status));
+
+        Compiler::ResultDesc ret;
+
+        ret.target.Reset();
+        ret.isText = true;
+        ret.errorWarningMsg.Reset();
+
+        CComPtr<IDxcBlobEncoding> errors;
+        IFT(preprocessResult->GetErrorBuffer(&errors));
+        if (errors != nullptr)
+        {
+            ret.errorWarningMsg.Reset(errors->GetBufferPointer(), static_cast<uint32_t>(errors->GetBufferSize()));
+            errors = nullptr;
+        }
+
+        ret.hasError = true;
+        if (SUCCEEDED(status))
+        {
+            CComPtr<IDxcBlob> program;
+            IFT(preprocessResult->GetResult(&program));
+            preprocessResult = nullptr;
+            if (program != nullptr)
+            {
+                ret.target.Reset(program->GetBufferPointer(), static_cast<uint32_t>(program->GetBufferSize()));
+                ret.hasError = false;
+            }
+        }
+
+        return ret;
+	  }
+
 } // namespace ShaderConductor
 
 #ifdef _WIN32
