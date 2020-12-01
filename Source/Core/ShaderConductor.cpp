@@ -740,18 +740,30 @@ namespace
             // Legacy GLSL fixups
             if (intVersion <= 300)
             {
-                auto vars = compiler->get_active_interface_variables();
+                auto resources = compiler->get_shader_resources();
+				std::vector<spirv_cross::ID> vars;
+				for (auto& res : resources.stage_inputs) {
+					vars.emplace_back(res.id);
+				}
+				for (auto& res : resources.stage_outputs) {
+					vars.emplace_back(res.id);
+				}
                 for (auto& var : vars)
                 {
                     auto varClass = compiler->get_storage_class(var);
 
                     // Make VS out and PS in variable names match
-                    if ((source.stage == ShaderStage::VertexShader) && (varClass == spv::StorageClass::StorageClassOutput))
+                    if ((source.stage == ShaderStage::VertexShader) && (varClass == spv::StorageClass::StorageClassOutput || varClass == spv::StorageClass::StorageClassInput))
                     {
                         auto name = compiler->get_name(var);
                         if ((name.find("out_var_") == 0) || (name.find("out.var.") == 0))
                         {
                             name.replace(0, 8, "varying_");
+                            compiler->set_name(var, name);
+                        }
+						if ((name.find("in_var_") == 0) || (name.find("in.var.") == 0))
+                        {
+                            name.replace(0, 7, "");
                             compiler->set_name(var, name);
                         }
                     }
@@ -900,6 +912,10 @@ namespace
 
             for (auto& remap : compiler->get_combined_image_samplers())
             {
+				if ((target.language == ShadingLanguage::Essl || target.language == ShadingLanguage::Glsl) && intVersion <= 300) {
+					compiler->set_name(remap.combined_id, compiler->get_name(remap.image_id));
+					continue;
+				}
                 compiler->set_name(remap.combined_id,
                                    "SPIRV_Cross_Combined" + compiler->get_name(remap.image_id) + compiler->get_name(remap.sampler_id));
             }
