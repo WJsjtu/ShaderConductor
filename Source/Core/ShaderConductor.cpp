@@ -1384,7 +1384,7 @@ namespace ShaderConductor
 
         // dxcArgStrings.push_back(std::wstring(L"-H"));
         dxcArgStrings.push_back(std::wstring(L"-I"));
-        dxcArgStrings.push_back(std::wstring(L"engine-lib"));
+        dxcArgStrings.push_back(std::wstring(L"system-lookup"));
 
         std::vector<const wchar_t*> dxcArgs;
         dxcArgs.reserve(dxcArgStrings.size());
