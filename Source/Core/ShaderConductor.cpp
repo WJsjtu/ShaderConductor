@@ -46,6 +46,7 @@
 #include <spirv_glsl.hpp>
 #include <spirv_hlsl.hpp>
 #include <spirv_msl.hpp>
+#include <spirv_reflect.hpp>
 
 #ifdef LLVM_ON_WIN32
 #include <d3d12shader.h>
@@ -741,19 +742,22 @@ namespace
             if (intVersion <= 300)
             {
                 auto resources = compiler->get_shader_resources();
-				std::vector<spirv_cross::ID> vars;
-				for (auto& res : resources.stage_inputs) {
-					vars.emplace_back(res.id);
-				}
-				for (auto& res : resources.stage_outputs) {
-					vars.emplace_back(res.id);
-				}
+                std::vector<spirv_cross::ID> vars;
+                for (auto& res : resources.stage_inputs)
+                {
+                    vars.emplace_back(res.id);
+                }
+                for (auto& res : resources.stage_outputs)
+                {
+                    vars.emplace_back(res.id);
+                }
                 for (auto& var : vars)
                 {
                     auto varClass = compiler->get_storage_class(var);
 
                     // Make VS out and PS in variable names match
-                    if ((source.stage == ShaderStage::VertexShader) && (varClass == spv::StorageClass::StorageClassOutput || varClass == spv::StorageClass::StorageClassInput))
+                    if ((source.stage == ShaderStage::VertexShader) &&
+                        (varClass == spv::StorageClass::StorageClassOutput || varClass == spv::StorageClass::StorageClassInput))
                     {
                         auto name = compiler->get_name(var);
                         if ((name.find("out_var_") == 0) || (name.find("out.var.") == 0))
@@ -761,7 +765,7 @@ namespace
                             name.replace(0, 8, "varying_");
                             compiler->set_name(var, name);
                         }
-						if ((name.find("in_var_") == 0) || (name.find("in.var.") == 0))
+                        if ((name.find("in_var_") == 0) || (name.find("in.var.") == 0))
                         {
                             name.replace(0, 7, "");
                             compiler->set_name(var, name);
@@ -788,6 +792,48 @@ namespace
                 return ret;
             }
             compiler = std::make_unique<spirv_cross::CompilerMSL>(spirvIr, spirvSize);
+            {
+                auto resources = compiler->get_shader_resources();
+                std::vector<spirv_cross::ID> vars;
+                for (auto& res : resources.stage_inputs)
+                {
+                    vars.emplace_back(res.id);
+                }
+                for (auto& res : resources.stage_outputs)
+                {
+                    vars.emplace_back(res.id);
+                }
+                for (auto& var : vars)
+                {
+                    auto varClass = compiler->get_storage_class(var);
+
+                    // Make VS out and PS in variable names match
+                    if ((source.stage == ShaderStage::VertexShader) &&
+                        (varClass == spv::StorageClass::StorageClassOutput || varClass == spv::StorageClass::StorageClassInput))
+                    {
+                        auto name = compiler->get_name(var);
+                        if ((name.find("out_var_") == 0) || (name.find("out.var.") == 0))
+                        {
+                            name.replace(0, 8, "varying_");
+                            compiler->set_name(var, name);
+                        }
+                        if ((name.find("in_var_") == 0) || (name.find("in.var.") == 0))
+                        {
+                            name.replace(0, 7, "");
+                            compiler->set_name(var, name);
+                        }
+                    }
+                    else if ((source.stage == ShaderStage::PixelShader) && (varClass == spv::StorageClass::StorageClassInput))
+                    {
+                        auto name = compiler->get_name(var);
+                        if ((name.find("in_var_") == 0) || (name.find("in.var.") == 0))
+                        {
+                            name.replace(0, 7, "varying_");
+                            compiler->set_name(var, name);
+                        }
+                    }
+                }
+            }
             break;
 
         default:
@@ -912,10 +958,11 @@ namespace
 
             for (auto& remap : compiler->get_combined_image_samplers())
             {
-				if ((target.language == ShadingLanguage::Essl || target.language == ShadingLanguage::Glsl) && intVersion <= 300) {
-					compiler->set_name(remap.combined_id, compiler->get_name(remap.image_id));
-					continue;
-				}
+                if ((target.language == ShadingLanguage::Essl || target.language == ShadingLanguage::Glsl) && intVersion <= 300)
+                {
+                    compiler->set_name(remap.combined_id, compiler->get_name(remap.image_id));
+                    continue;
+                }
                 compiler->set_name(remap.combined_id,
                                    "SPIRV_Cross_Combined" + compiler->get_name(remap.image_id) + compiler->get_name(remap.sampler_id));
             }
@@ -941,6 +988,13 @@ namespace
                                        sizeof(Compiler::ReflectionDesc) * binaryResult.reflection.descCount);
             ret.reflection.descCount = binaryResult.reflection.descCount;
             ret.reflection.instructionCount = binaryResult.reflection.instructionCount;
+            const uint32_t* compiledSpirvIr = reinterpret_cast<const uint32_t*>(binaryResult.target.Data());
+            const size_t compiledSpirvSize = binaryResult.target.Size() / sizeof(uint32_t);
+            spirv_cross::CompilerReflection reflection(compiledSpirvIr, compiledSpirvSize);
+            reflection.set_format("json");
+            auto reflectionString = reflection.compile();
+            std::vector<char> reflectionChars(reflectionString.begin(), reflectionString.end());
+            ret.SpvReflection.Reset(reflectionChars.data(), static_cast<uint32_t>(reflectionChars.size()));
         }
         catch (spirv_cross::CompilerError& error)
         {
@@ -1409,10 +1463,11 @@ namespace ShaderConductor
             dxcArgs.push_back(arg.c_str());
         }
 
-		    CComPtr<IDxcIncludeHandler> includeHandler = new ScIncludeHandler(std::move(source.loadIncludeCallback));
-		    CComPtr<IDxcOperationResult> preprocessResult;
-		    IFT(Dxcompiler::Instance().Compiler()->Preprocess(sourceBlob, shaderNameUtf16.c_str(), dxcArgs.data(), static_cast<UINT32>(dxcArgs.size()), dxcDefines.data(),
-			                                                    static_cast<UINT32>(dxcDefines.size()), includeHandler, &preprocessResult));
+        CComPtr<IDxcIncludeHandler> includeHandler = new ScIncludeHandler(std::move(source.loadIncludeCallback));
+        CComPtr<IDxcOperationResult> preprocessResult;
+        IFT(Dxcompiler::Instance().Compiler()->Preprocess(sourceBlob, shaderNameUtf16.c_str(), dxcArgs.data(),
+                                                          static_cast<UINT32>(dxcArgs.size()), dxcDefines.data(),
+                                                          static_cast<UINT32>(dxcDefines.size()), includeHandler, &preprocessResult));
 
         HRESULT status;
         IFT(preprocessResult->GetStatus(&status));
@@ -1445,7 +1500,7 @@ namespace ShaderConductor
         }
 
         return ret;
-	  }
+    }
 
 } // namespace ShaderConductor
 

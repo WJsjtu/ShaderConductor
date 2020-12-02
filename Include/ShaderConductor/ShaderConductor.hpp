@@ -215,6 +215,7 @@ namespace ShaderConductor
             bool hasError;
 
             ReflectionResultDesc reflection;
+            Blob SpvReflection;
         };
 
         struct DisassembleDesc

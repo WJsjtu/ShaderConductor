@@ -74,10 +74,11 @@ target_link_libraries(${LIB_NAME}
         spirv-cross-glsl
         spirv-cross-hlsl
         spirv-cross-msl
+        spirv-cross-reflect
         SPIRV-Tools
 )
 
-add_dependencies(${LIB_NAME} spirv-cross-core spirv-cross-glsl spirv-cross-hlsl spirv-cross-msl)
+add_dependencies(${LIB_NAME} spirv-cross-core spirv-cross-glsl spirv-cross-hlsl spirv-cross-msl spirv-cross-reflect)
 add_dependencies(${LIB_NAME} CopyDxcompiler)
 add_dependencies(${LIB_NAME} SPIRV-Tools)
 
