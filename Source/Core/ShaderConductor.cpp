@@ -988,9 +988,17 @@ namespace
                                        sizeof(Compiler::ReflectionDesc) * binaryResult.reflection.descCount);
             ret.reflection.descCount = binaryResult.reflection.descCount;
             ret.reflection.instructionCount = binaryResult.reflection.instructionCount;
-            const uint32_t* compiledSpirvIr = reinterpret_cast<const uint32_t*>(binaryResult.target.Data());
-            const size_t compiledSpirvSize = binaryResult.target.Size() / sizeof(uint32_t);
-            spirv_cross::CompilerReflection reflection(compiledSpirvIr, compiledSpirvSize);
+
+            struct CompilerGLSLWrapper : spirv_cross::CompilerGLSL
+            {
+                const spirv_cross::ParsedIR& get_ir()
+                {
+                    return ir;
+                }
+            };
+
+            CompilerGLSLWrapper* compilerWrapper = static_cast<CompilerGLSLWrapper*>(compiler.get());
+            spirv_cross::CompilerReflection reflection(compilerWrapper->get_ir());
             reflection.set_format("json");
             auto reflectionString = reflection.compile();
             std::vector<char> reflectionChars(reflectionString.begin(), reflectionString.end());
